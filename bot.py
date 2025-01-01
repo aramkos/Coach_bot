@@ -1,5 +1,6 @@
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
 import os
 
@@ -15,57 +16,68 @@ dp = Dispatcher(bot)
 # Временное хранилище данных (в памяти)
 user_data = {}
 
-# Обработчик команды /start (только в личных сообщениях)
-@dp.message_handler(commands=["start"], chat_type=types.ChatType.PRIVATE)
-async def start_command(message: types.Message):
-    await message.reply("Привет! Я твой фитнес-бот. Напиши /survey в группе, чтобы внести данные.")
-
-# Обработчик команды /survey (только в группе)
+# Обработчик команды /survey (начало опроса в группе)
 @dp.message_handler(commands=["survey"], chat_type=[types.ChatType.GROUP, types.ChatType.SUPERGROUP])
 async def survey_command(message: types.Message):
     if message.chat.id != GROUP_ID:
         await message.reply("Эта команда доступна только в указанной группе.")
         return
 
+    # Создание инлайн-кнопки
+    keyboard = InlineKeyboardMarkup()
+    button = InlineKeyboardButton(
+        text="Продолжить в личных сообщениях",
+        url=f"tg://user?id={message.from_user.id}"
+    )
+    keyboard.add(button)
+
+    await message.reply(
+        f"{message.from_user.first_name}, нажмите на кнопку ниже, чтобы продолжить опрос в личных сообщениях.",
+        reply_markup=keyboard
+    )
+
+# Обработчик опроса в личных сообщениях
+@dp.message_handler(chat_type=types.ChatType.PRIVATE)
+async def private_survey(message: types.Message):
     user_id = message.from_user.id
-    user_data[user_id] = {}
-    await message.reply(f"{message.from_user.first_name}, введите ваш вес (в кг):")
-    dp.register_message_handler(weight_handler, user_id=user_id)
 
-# Обработчик ввода веса
-async def weight_handler(message: types.Message):
-    try:
-        weight = float(message.text)
-        user_data[message.from_user.id]["weight"] = weight
-        await message.reply("Введите процент жира (%):")
-        dp.register_message_handler(fat_handler, user_id=message.from_user.id)
-    except ValueError:
-        await message.reply("Пожалуйста, введите корректный вес (число).")
-
-# Обработчик ввода процента жира
-async def fat_handler(message: types.Message):
-    try:
-        fat = float(message.text)
-        user_data[message.from_user.id]["fat"] = fat
-        await message.reply("Данные сохранены! Напишите /stats, чтобы посмотреть их.")
-    except ValueError:
-        await message.reply("Пожалуйста, введите корректный процент жира (число).")
-
-# Обработчик команды /stats (только в группе)
-@dp.message_handler(commands=["stats"], chat_type=[types.ChatType.GROUP, types.ChatType.SUPERGROUP])
-async def stats_command(message: types.Message):
-    if message.chat.id != GROUP_ID:
-        await message.reply("Эта команда доступна только в указанной группе.")
+    # Если пользователь начинает опрос
+    if user_id not in user_data:
+        user_data[user_id] = {"stage": "weight"}
+        await message.reply("Введите ваш вес (в кг):")
         return
 
+    # Проверка текущей стадии
+    stage = user_data[user_id]["stage"]
+
+    if stage == "weight":
+        try:
+            weight = float(message.text)
+            user_data[user_id]["weight"] = weight
+            user_data[user_id]["stage"] = "fat"
+            await message.reply("Введите процент жира (%):")
+        except ValueError:
+            await message.reply("Пожалуйста, введите корректный вес (число).")
+
+    elif stage == "fat":
+        try:
+            fat = float(message.text)
+            user_data[user_id]["fat"] = fat
+            user_data[user_id]["stage"] = "completed"
+            await message.reply("Данные сохранены! Спасибо за участие.")
+        except ValueError:
+            await message.reply("Пожалуйста, введите корректный процент жира (число).")
+
+# Обработчик команды /stats (вывод данных)
+@dp.message_handler(commands=["stats"], chat_type=types.ChatType.PRIVATE)
+async def stats_command(message: types.Message):
     data = user_data.get(message.from_user.id)
-    if data:
+    if data and data.get("stage") == "completed":
         await message.reply(
-            f"{message.from_user.first_name}, ваши данные:\n"
-            f"Вес: {data['weight']} кг\nПроцент жира: {data['fat']}%"
+            f"Ваши данные:\nВес: {data['weight']} кг\nПроцент жира: {data['fat']}%"
         )
     else:
-        await message.reply("Ваших данных пока нет. Напишите /survey, чтобы внести их.")
+        await message.reply("Ваших данных пока нет. Напишите /survey в группе, чтобы внести их.")
 
 # Запуск бота
 if __name__ == "__main__":
