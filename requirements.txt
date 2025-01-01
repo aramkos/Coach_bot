@@ -1,2 +1,2 @@
-pip install --upgrade pip
-pip install aiogram flask
+aiogram==2.25.1
+Flask==2.2.2
